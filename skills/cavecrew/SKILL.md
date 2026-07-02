@@ -27,6 +27,29 @@ Cavecrew = three subagent presets that emit caveman output. Same job as Anthropi
 
 Rule of thumb: **if you'd want the subagent's output in 1/3 the tokens, pick cavecrew. If you'd want prose, pick vanilla.**
 
+## Model routing (cost tiering)
+
+Each agent runs on a fixed model tier so cheap work never burns Opus quota. Main thread stays Opus 4.8 (reasoning + orchestration); it delegates *execution* down-tier.
+
+| Agent / thread | Model | Why this tier |
+|---|---|---|
+| main thread | Opus 4.8 | Orchestration, architecture, hard/exploratory debug, decisions |
+| `cavecrew-reviewer` | Opus (inherits) | Bug-finding is reasoning — keep flagship |
+| `cavecrew-builder` | Sonnet 5 | Mechanical edit ≤2 files — Sonnet ~5x cheaper than Opus, quality ample |
+| `cavecrew-investigator` | Haiku | Locate = pattern match — cheapest tier is enough |
+
+**Delegate down-tier ONLY when the task is:**
+- **Self-contained** — every fact the agent needs fits in the spawn prompt. No back-and-forth (each round = new cold spawn = lost savings).
+- **Clear output** — you can name the exact deliverable up front (a `file:line` list, a diff receipt).
+- **Bounded** — investigator: one search intent; builder: ≤2 files AND site already known.
+
+**Do NOT delegate — keep on Opus main — when:**
+- The fix isn't known yet (exploratory debug).
+- Architecture / design / tradeoff calls.
+- Task only makes sense with the main thread's accumulated context.
+
+Net effect: Opus reasons + decides, cheaper tiers execute volume → weekly Opus budget spent only where reasoning is the product. Overhead caveat: a spawn re-reads context cold, so a *single* tiny edit main could do in one `Edit` may cost more delegated than inline — delegate for *volume* and *context-offload*, not one-liners.
+
 ## Why this exists (the real win)
 
 Subagent tool results get injected into main context verbatim. A vanilla `Explore` that returns 2k tokens of prose costs 2k tokens of main-context budget every time. The same finding from `cavecrew-investigator` returns ~700 tokens. Across 20 delegations in one session that's the difference between context exhaustion and finishing the task.
